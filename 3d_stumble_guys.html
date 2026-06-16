@@ -1,0 +1,1275 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Stumble Guys 3D 網頁版</title>
+    <!-- Tailwind CSS for UI styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            user-select: none;
+            -webkit-user-select: none;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #0b0f19;
+        }
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+        /* Touch controls */
+        .joystick-zone {
+            position: absolute;
+            bottom: 30px;
+            left: 30px;
+            width: 150px;
+            height: 150px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            z-index: 10;
+            display: none; /* Shown dynamically on mobile detection */
+            touch-action: none;
+        }
+        .joystick-knob {
+            position: absolute;
+            top: 50px;
+            left: 50px;
+            width: 50px;
+            height: 50px;
+            background: radial-gradient(circle, #ff4e50, #f9d423);
+            border-radius: 50%;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+            transform: translate(0, 0);
+            pointer-events: none;
+        }
+        .jump-btn-zone {
+            position: absolute;
+            bottom: 45px;
+            right: 45px;
+            width: 80px;
+            height: 80px;
+            background: radial-gradient(circle, #00c6ff, #0072ff);
+            border: 3px solid rgba(255, 255, 255, 0.6);
+            border-radius: 50%;
+            z-index: 10;
+            display: none;
+            touch-action: none;
+            box-shadow: 0 6px 15px rgba(0,0,0,0.4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 24px;
+            font-weight: bold;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+            active {
+                transform: scale(0.9);
+                background: radial-gradient(circle, #0072ff, #00c6ff);
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 遊戲 3D 渲染區域 -->
+    <div id="canvas-container"></div>
+
+    <!-- 頂部 UI 資訊欄 -->
+    <div class="absolute top-4 left-4 z-10 flex flex-col gap-2 pointer-events-none">
+        <div class="bg-black/60 backdrop-blur-md border border-white/20 text-white px-4 py-2 rounded-xl flex items-center gap-3 shadow-lg">
+            <span class="text-yellow-400 font-black tracking-wider text-sm"><i class="fa-solid fa-trophy mr-1"></i> 目標:</span>
+            <span class="font-extrabold text-lg text-white" id="goal-text">到達終點皇冠！</span>
+        </div>
+        <div class="bg-black/60 backdrop-blur-md border border-white/20 text-white px-4 py-2 rounded-xl flex items-center gap-3 shadow-lg">
+            <span class="text-red-400 font-black tracking-wider text-sm"><i class="fa-solid fa-heart mr-1"></i> 跌落次數:</span>
+            <span class="font-extrabold text-lg text-white" id="fail-count">0</span>
+        </div>
+        <div class="bg-black/60 backdrop-blur-md border border-white/20 text-white px-4 py-2 rounded-xl flex items-center gap-3 shadow-lg">
+            <span class="text-blue-400 font-black tracking-wider text-sm"><i class="fa-solid fa-stopwatch mr-1"></i> 時間:</span>
+            <span class="font-mono text-lg font-bold text-white" id="timer">00:00.00</span>
+        </div>
+    </div>
+
+    <!-- 右上角設定/重置按鈕 -->
+    <div class="absolute top-4 right-4 z-10 flex gap-2">
+        <button id="reset-btn" class="bg-red-500 hover:bg-red-600 border border-white/20 text-white px-4 py-2.5 rounded-xl font-bold transition shadow-lg active:scale-95 flex items-center gap-2">
+            <i class="fa-solid fa-arrow-rotate-right"></i> 重來
+        </button>
+        <button id="camera-btn" class="bg-indigo-600 hover:bg-indigo-700 border border-white/20 text-white px-4 py-2.5 rounded-xl font-bold transition shadow-lg active:scale-95 flex items-center gap-2">
+            <i class="fa-solid fa-camera"></i> 視角 (F)
+        </button>
+    </div>
+
+    <!-- 手機虛擬搖桿與按鍵 -->
+    <div id="joystick" class="joystick-zone">
+        <div id="joystick-knob" class="joystick-knob"></div>
+    </div>
+    <div id="jump-btn" class="jump-btn-zone">
+        <i class="fa-solid fa-arrow-up"></i>
+    </div>
+
+    <!-- 遊戲初始開始畫面 (Overlay) -->
+    <div id="start-screen" class="absolute inset-0 bg-slate-900/95 z-50 flex flex-col items-center justify-content-center p-6 text-center">
+        <div class="max-w-md w-full bg-slate-800/80 border border-slate-700 p-8 rounded-3xl shadow-2xl backdrop-blur-lg flex flex-col items-center">
+            <!-- 標題 -->
+            <h1 class="text-5xl font-black mb-1 bg-gradient-to-r from-yellow-400 via-orange-500 to-red-500 bg-clip-text text-transparent drop-shadow-lg tracking-wider uppercase animate-bounce">
+                STUMBLE RUN
+            </h1>
+            <p class="text-xs text-slate-400 mb-6 font-bold tracking-widest">3D 糖豆人闖關派對</p>
+
+            <!-- 說明與玩法 -->
+            <div class="w-full text-left bg-slate-900/60 p-4 rounded-2xl border border-slate-700/50 text-slate-300 text-sm space-y-3 mb-6">
+                <div class="flex items-center gap-3">
+                    <span class="bg-amber-500 text-slate-950 font-black px-2 py-0.5 rounded text-xs">鍵盤</span>
+                    <span><strong class="text-white">WASD / 方向鍵</strong> 控制移動</span>
+                </div>
+                <div class="flex items-center gap-3">
+                    <span class="bg-amber-500 text-slate-950 font-black px-2 py-0.5 rounded text-xs">空白</span>
+                    <span><strong class="text-white">SPACE鍵</strong> 跳躍 (可連按兩次二段跳)</span>
+                </div>
+                <div class="flex items-center gap-3">
+                    <span class="bg-amber-500 text-slate-950 font-black px-2 py-0.5 rounded text-xs">滑鼠</span>
+                    <span><strong class="text-white">拖曳畫面</strong> 旋轉並調整相機角度</span>
+                </div>
+                <div class="flex items-center gap-3">
+                    <span class="bg-amber-500 text-slate-950 font-black px-2 py-0.5 rounded text-xs">行動</span>
+                    <span>支援行動裝置 <strong class="text-white">虛擬搖桿與跳躍鍵</strong></span>
+                </div>
+                <div class="h-px bg-slate-700 my-2"></div>
+                <p class="text-center text-xs text-yellow-400 font-semibold"><i class="fa-solid fa-circle-exclamation mr-1"></i> 小心旋轉木槌、傳送帶與滾動的大球！</p>
+            </div>
+
+            <!-- 選擇糖豆人顏色 -->
+            <div class="w-full mb-6 text-left">
+                <label class="text-xs font-bold text-slate-400 tracking-wider block mb-2">選擇糖豆人顏色：</label>
+                <div class="flex justify-between gap-2" id="color-selector">
+                    <button data-color="0xff3b30" class="w-10 h-10 rounded-full bg-red-500 border-4 border-white shadow-md cursor-pointer transition transform hover:scale-110 active:scale-95"></button>
+                    <button data-color="0x34c759" class="w-10 h-10 rounded-full bg-green-500 border-2 border-transparent shadow-md cursor-pointer transition transform hover:scale-110 active:scale-95"></button>
+                    <button data-color="0x007aff" class="w-10 h-10 rounded-full bg-blue-500 border-2 border-transparent shadow-md cursor-pointer transition transform hover:scale-110 active:scale-95"></button>
+                    <button data-color="0xffcc00" class="w-10 h-10 rounded-full bg-yellow-400 border-2 border-transparent shadow-md cursor-pointer transition transform hover:scale-110 active:scale-95"></button>
+                    <button data-color="0xaf52de" class="w-10 h-10 rounded-full bg-purple-500 border-2 border-transparent shadow-md cursor-pointer transition transform hover:scale-110 active:scale-95"></button>
+                </div>
+            </div>
+
+            <button id="start-btn" class="w-full bg-gradient-to-r from-yellow-400 to-orange-500 text-slate-950 text-xl font-extrabold py-4 px-8 rounded-2xl shadow-xl hover:from-yellow-300 hover:to-orange-400 active:scale-95 transition tracking-widest uppercase">
+                進入派對！
+            </button>
+        </div>
+    </div>
+
+    <!-- 通關 / 遊戲結束畫面 (Overlay) -->
+    <div id="game-over-screen" class="absolute inset-0 bg-slate-950/90 z-40 hidden flex flex-col items-center justify-content-center p-6 text-center">
+        <div class="max-w-md w-full bg-slate-900 border border-slate-700/80 p-8 rounded-3xl shadow-2xl flex flex-col items-center animate-scaleIn">
+            <div class="w-24 h-24 bg-yellow-400/20 rounded-full flex items-center justify-content-center mb-4 border border-yellow-400/50">
+                <i class="fa-solid fa-crown text-yellow-400 text-5xl animate-bounce"></i>
+            </div>
+            <h2 id="end-title" class="text-4xl font-black mb-2 text-white">QUALIFIED!</h2>
+            <p class="text-sm text-slate-400 mb-6">恭喜你成功突圍並奪得皇冠！</p>
+
+            <div class="w-full grid grid-cols-2 gap-3 mb-6">
+                <div class="bg-slate-800 p-3 rounded-xl border border-slate-700/50">
+                    <div class="text-xs text-slate-400 font-bold mb-1">通關時間</div>
+                    <div id="end-time" class="text-xl font-black text-yellow-400 font-mono">00:00.00</div>
+                </div>
+                <div class="bg-slate-800 p-3 rounded-xl border border-slate-700/50">
+                    <div class="text-xs text-slate-400 font-bold mb-1">失誤次數</div>
+                    <div id="end-fails" class="text-xl font-black text-red-400">0 次</div>
+                </div>
+            </div>
+
+            <button id="play-again-btn" class="w-full bg-gradient-to-r from-emerald-400 to-teal-500 text-slate-950 text-lg font-black py-3.5 px-6 rounded-xl shadow-lg hover:from-emerald-300 hover:to-teal-400 active:scale-95 transition tracking-wider">
+                再玩一次
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // --- 遊戲常數與設定 ---
+        const WORLD_GRAVITY = -18; // 模擬物理重力加速度
+        let playerColor = 0xff3b30; // 預設紅色
+        let isMobile = false;
+
+        // 檢查裝置類型
+        function checkMobile() {
+            isMobile = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+            if (isMobile) {
+                document.getElementById('joystick').style.display = 'block';
+                document.getElementById('jump-btn').style.display = 'flex';
+            } else {
+                document.getElementById('joystick').style.display = 'none';
+                document.getElementById('jump-btn').style.display = 'none';
+            }
+        }
+
+        // --- Three.js 主要變數 ---
+        let scene, camera, renderer;
+        let clock;
+        let ambientLight, dirLight;
+        
+        // 遊戲狀態與計時
+        let gameActive = false;
+        let startTime = null;
+        let totalTimeElapsed = 0;
+        let failCount = 0;
+        let gameTimerInterval = null;
+
+        // 玩家物件與物理資料
+        let player;
+        const playerPhysics = {
+            velocity: new THREE.Vector3(),
+            onGround: false,
+            doubleJumpAvailable: true,
+            radius: 0.6,
+            height: 1.5,
+            speed: 8.0,
+            jumpForce: 7.5
+        };
+
+        // 按鍵與控制輸入
+        const keys = { w: false, a: false, s: false, d: false, ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false };
+        let touchInput = { x: 0, y: 0 }; // 搖桿傳入方向向量
+        
+        // 相機環繞設定
+        const cameraConfig = {
+            distance: 7.5,
+            height: 3.5,
+            angle: 0, // 水平環繞角度
+            targetAngle: 0,
+            pitch: 0.25, // 上下傾斜度
+            mode: 'behind' // 'behind' or 'free'
+        };
+        let isMouseDown = false;
+        let previousMousePosition = { x: 0, y: 0 };
+
+        // 關卡平台與障礙物陣列
+        const platforms = [];
+        const rotatingObstacles = [];
+        const swingingObstacles = [];
+        const conveyorObstacles = [];
+        const boostPads = [];
+        let finishCrown; // 終點目標
+
+        // 顏色選擇器邏輯
+        const colorButtons = document.querySelectorAll('#color-selector button');
+        colorButtons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                colorButtons.forEach(b => b.classList.replace('border-white', 'border-transparent'));
+                btn.classList.replace('border-transparent', 'border-white');
+                playerColor = parseInt(btn.getAttribute('data-color'));
+                if (player) {
+                    player.children[0].material.color.setHex(playerColor); // 更新即時預覽
+                }
+            });
+        });
+
+        // 遊戲初始化
+        window.onload = function() {
+            checkMobile();
+            window.addEventListener('resize', onWindowResize);
+
+            // 綁定 UI 事件
+            document.getElementById('start-btn').addEventListener('click', startGame);
+            document.getElementById('reset-btn').addEventListener('click', resetPlayer);
+            document.getElementById('play-again-btn').addEventListener('click', restartGame);
+            document.getElementById('camera-btn').addEventListener('click', toggleCameraMode);
+
+            // 建立 3D 場景
+            init3D();
+            
+            // 建立關卡地圖
+            buildLevel();
+
+            // 註冊控制監聽器
+            setupControls();
+
+            // 開始 3D 渲染與更新循環
+            clock = new THREE.Clock();
+            animate();
+        };
+
+        // --- 1. 建立 3D 基礎場景 ---
+        function init3D() {
+            const container = document.getElementById('canvas-container');
+            
+            // 創建場景
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xa0c0f0); // 經典天空藍
+            scene.fog = new THREE.FogExp2(0xa0c0f0, 0.015); // 加入迷霧增加空間感
+
+            // 創建相機
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+
+            // 創建渲染器
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            container.appendChild(renderer.domElement);
+
+            // 光源：高雅柔和的卡通色調
+            ambientLight = new THREE.AmbientLight(0xffffff, 0.45);
+            scene.add(ambientLight);
+
+            dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(30, 60, 20);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 1024;
+            dirLight.shadow.mapSize.height = 1024;
+            dirLight.shadow.camera.near = 0.5;
+            dirLight.shadow.camera.far = 150;
+            const d = 50;
+            dirLight.shadow.camera.left = -d;
+            dirLight.shadow.camera.right = d;
+            dirLight.shadow.camera.top = d;
+            dirLight.shadow.camera.bottom = -d;
+            scene.add(dirLight);
+
+            // 加上底部深淵水面（裝飾，跌落用的參考高度）
+            const waterGeo = new THREE.PlaneGeometry(1000, 1000);
+            const waterMat = new THREE.MeshLambertMaterial({ color: 0x2255aa, transparent: true, opacity: 0.8 });
+            const water = new THREE.Mesh(waterGeo, waterMat);
+            water.rotation.x = -Math.PI / 2;
+            water.position.y = -15; // 遠低於平台
+            scene.add(water);
+
+            // 創建糖豆人玩家模型
+            createPlayerModel();
+        }
+
+        // --- 2. 建立糖豆人（Player）模型 ---
+        function createPlayerModel() {
+            // 使用 Group 組裝一個可愛的糖豆人
+            player = new THREE.Group();
+            player.position.set(0, 3, 0); // 起點位置
+
+            // 身體：膠囊狀 (使用柱體與上下球體拼接)
+            const bodyGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.7, 16);
+            const bodyMat = new THREE.MeshStandardMaterial({ 
+                color: playerColor, 
+                roughness: 0.3,
+                metalness: 0.1
+            });
+            const body = new THREE.Mesh(bodyGeo, bodyMat);
+            body.castShadow = true;
+            body.receiveShadow = true;
+            player.add(body);
+
+            const topHeadGeo = new THREE.SphereGeometry(0.5, 16, 16, 0, Math.PI * 2, 0, Math.PI / 2);
+            const topHead = new THREE.Mesh(topHeadGeo, bodyMat);
+            topHead.position.y = 0.35;
+            topHead.castShadow = true;
+            player.add(topHead);
+
+            const bottomGeo = new THREE.SphereGeometry(0.5, 16, 16, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2);
+            const bottom = new THREE.Mesh(bottomGeo, bodyMat);
+            bottom.position.y = -0.35;
+            bottom.castShadow = true;
+            player.add(bottom);
+
+            // 護目鏡/面罩 (糖豆人的經典臉部)
+            const maskGeo = new THREE.SphereGeometry(0.28, 16, 16);
+            const maskMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.1 });
+            const mask = new THREE.Mesh(maskGeo, maskMat);
+            mask.scale.set(1.1, 0.7, 0.5);
+            mask.position.set(0, 0.2, 0.42);
+            player.add(mask);
+
+            // 面罩黑框眼鏡
+            const eye1Geo = new THREE.SphereGeometry(0.04, 8, 8);
+            const eyeMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
+            const eye1 = new THREE.Mesh(eye1Geo, eyeMat);
+            eye1.position.set(-0.08, 0.2, 0.55);
+            player.add(eye1);
+
+            const eye2 = eye1.clone();
+            eye2.position.set(0.08, 0.2, 0.55);
+            player.add(eye2);
+
+            // 小短腿和小手
+            const limbGeo = new THREE.SphereGeometry(0.18, 8, 8);
+            const limbMat = new THREE.MeshStandardMaterial({ color: 0xdd2222, roughness: 0.4 }); // 動態對齊配色
+            
+            const leftLeg = new THREE.Mesh(limbGeo, limbMat);
+            leftLeg.position.set(-0.25, -0.6, 0);
+            leftLeg.name = "leftLeg";
+            player.add(leftLeg);
+
+            const rightLeg = leftLeg.clone();
+            rightLeg.position.set(0.25, -0.6, 0);
+            rightLeg.name = "rightLeg";
+            player.add(rightLeg);
+
+            scene.add(player);
+        }
+
+        // --- 3. 建造超大型 Stumble Guys 闖關地圖 ---
+        function buildLevel() {
+            // 精美的彩色材質板模
+            const mats = {
+                blue: new THREE.MeshStandardMaterial({ color: 0x0088ff, roughness: 0.4 }),
+                yellow: new THREE.MeshStandardMaterial({ color: 0xffcc00, roughness: 0.4 }),
+                pink: new THREE.MeshStandardMaterial({ color: 0xff2a85, roughness: 0.4 }),
+                purple: new THREE.MeshStandardMaterial({ color: 0x8e44ad, roughness: 0.4 }),
+                orange: new THREE.MeshStandardMaterial({ color: 0xd35400, roughness: 0.4 }),
+                green: new THREE.MeshStandardMaterial({ color: 0x2ecc71, roughness: 0.4 }),
+                conveyor: new THREE.MeshStandardMaterial({ color: 0x34495e, roughness: 0.6 }),
+                goal: new THREE.MeshStandardMaterial({ color: 0xf1c40f, roughness: 0.2, metalness: 0.6 }),
+                finish: new THREE.MeshStandardMaterial({ color: 0x27ae60, roughness: 0.4 })
+            };
+
+            // 輔助函式：新增平台到物理與渲染陣列
+            function createBoxPlatform(x, y, z, w, h, d, material, customProps = {}) {
+                const geo = new THREE.BoxGeometry(w, h, d);
+                const mesh = new THREE.Mesh(geo, material);
+                mesh.position.set(x, y, z);
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                scene.add(mesh);
+
+                // 【關鍵修正】強制即時更新世界矩陣，避免 AABB 包圍盒讀取到錯誤的初始(0,0,0)座標
+                mesh.updateMatrixWorld(true);
+                const box = new THREE.Box3().setFromObject(mesh);
+
+                platforms.push({
+                    mesh: mesh,
+                    box: box,
+                    halfWidth: w / 2,
+                    halfHeight: h / 2,
+                    halfDepth: d / 2,
+                    ...customProps
+                });
+                return mesh;
+            }
+
+            // 輔助函式：新增圓柱平台
+            function createCylinderPlatform(x, y, z, r, h, material) {
+                const geo = new THREE.CylinderGeometry(r, r, h, 32);
+                const mesh = new THREE.Mesh(geo, material);
+                mesh.position.set(x, y, z);
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                scene.add(mesh);
+
+                // 【關鍵修正】強制即時更新世界矩陣
+                mesh.updateMatrixWorld(true);
+                const box = new THREE.Box3().setFromObject(mesh);
+
+                platforms.push({
+                    mesh: mesh,
+                    box: box,
+                    halfWidth: r,
+                    halfHeight: h / 2,
+                    halfDepth: r,
+                    isCylinder: true,
+                    radius: r
+                });
+                return mesh;
+            }
+
+            // --- 關卡地形佈局 ---
+            
+            // 1. 起點大平台
+            createBoxPlatform(0, 0, 0, 10, 1, 10, mats.blue);
+
+            // 2. 窄道木槌區域 (x: 0, z: 12 到 24)
+            createBoxPlatform(0, 0, 17, 6, 1, 12, mats.orange);
+            
+            // 障礙物：旋轉大木槌 2 個 (會將玩家掃飛出去)
+            createRotator(0, 1.2, 14, 4.5, 0.4, 0.4, mats.pink, 1.8);
+            createRotator(0, 1.2, 20, 4.5, 0.4, 0.4, mats.pink, -2.2);
+
+            // 3. 蹦蹦彈床跳躍區 (z: 28 到 38)
+            createBoxPlatform(-4, -0.5, 29, 3, 1, 3, mats.purple);
+            createBoxPlatform(4, -0.5, 29, 3, 1, 3, mats.purple);
+            createBoxPlatform(0, 0, 35, 4, 1, 4, mats.yellow);
+            
+            // 蹦蹦彈跳墊 (Boost Pads)
+            createBoostPad(-4, 0.1, 29, 2, 2, mats.pink, 12);
+            createBoostPad(4, 0.1, 29, 2, 2, mats.pink, 12);
+            createBoostPad(0, 0.6, 35, 3, 3, mats.pink, 15); // 中央大彈床
+
+            // 4. 三條傳送帶路徑 (z: 44 到 60)
+            // 左(逆流)、中(順流)、右(逆流)
+            createBoxPlatform(-5, 1, 52, 3, 1, 12, mats.conveyor, { conveyorSpeed: -3.0 }); // 倒退帶
+            createBoxPlatform(0, 1, 52, 3, 1, 12, mats.conveyor, { conveyorSpeed: 4.5 });   // 急速前進帶
+            createBoxPlatform(5, 1, 52, 3, 1, 12, mats.conveyor, { conveyorSpeed: -3.0 }); // 倒退帶
+
+            // 5. 巨大單擺流星錘平台 (z: 64 到 82)
+            createBoxPlatform(0, 0.5, 73, 8, 1, 16, mats.yellow);
+            // 流星錘掛載架與擺球
+            createSwinger(0, 7, 69, 10, 1.5, mats.pink, 1.5, 0);       // 第一顆左右擺動
+            createSwinger(0, 7, 77, 10, 1.5, mats.pink, 1.5, Math.PI); // 第二顆反向擺動
+
+            // 6. 連續浮空梅花樁旋轉齒輪 (z: 88 到 112)
+            createCylinderPlatform(-4, 1, 88, 2.2, 1, mats.blue);
+            createCylinderPlatform(4, 2, 96, 2.2, 1, mats.purple);
+            createCylinderPlatform(-4, 3, 104, 2.2, 1, mats.blue);
+            
+            // 齒輪上增加旋轉防護柱，考驗時機
+            createRotator(-4, 2.1, 88, 3.8, 0.3, 0.3, mats.orange, 1.2);
+            createRotator(4, 3.1, 96, 3.8, 0.3, 0.3, mats.orange, -1.2);
+            createRotator(-4, 4.1, 104, 3.8, 0.3, 0.3, mats.orange, 1.5);
+
+            // 7. 最後的陡峭攀爬斜坡 + 滾石障礙 (z: 114 到 138)
+            const slopeGeo = new THREE.BoxGeometry(10, 1, 24);
+            const slope = new THREE.Mesh(slopeGeo, mats.orange);
+            // 旋轉斜坡
+            slope.position.set(0, 6.2, 124);
+            slope.rotation.x = 0.25; // 傾斜角約 14 度
+            slope.castShadow = true;
+            slope.receiveShadow = true;
+            scene.add(slope);
+            
+            slope.updateMatrixWorld(true);
+            const slopeBox = new THREE.Box3().setFromObject(slope);
+            platforms.push({
+                mesh: slope,
+                box: slopeBox,
+                halfWidth: 5,
+                halfHeight: 0.5,
+                halfDepth: 12,
+                isSlope: true,
+                angleX: 0.25
+            });
+
+            // 滾石產生處 (我們會利用程式動態滾動大球下來)
+            createRollingStone(2, 10, 134, mats.purple);
+            createRollingStone(-2, 12, 126, mats.purple);
+
+            // 8. 終點皇冠大平台 (z: 140 到 150)
+            createBoxPlatform(0, 9.2, 144, 8, 1, 8, mats.finish);
+
+            // 放置巨大皇冠 (旋轉並閃爍黃金光芒)
+            buildCrown(0, 11, 144);
+        }
+
+        // --- 關卡細節組裝函式 ---
+
+        // 旋轉木槌
+        function createRotator(x, y, z, length, width, depth, material, speed) {
+            const group = new THREE.Group();
+            group.position.set(x, y, z);
+            
+            // 木槌軸心
+            const poleGeo = new THREE.CylinderGeometry(0.2, 0.2, 1, 8);
+            const pole = new THREE.Mesh(poleGeo, new THREE.MeshStandardMaterial({ color: 0x7f8c8d }));
+            pole.position.y = -0.4;
+            group.add(pole);
+
+            // 旋轉長臂
+            const armGeo = new THREE.BoxGeometry(length, width, depth);
+            const arm = new THREE.Mesh(armGeo, material);
+            arm.castShadow = true;
+            group.add(arm);
+
+            scene.add(group);
+            rotatingObstacles.push({
+                group: group,
+                speed: speed,
+                length: length,
+                width: width,
+                depth: depth
+            });
+        }
+
+        // 彈跳墊
+        function createBoostPad(x, y, z, w, d, material, power) {
+            const padGeo = new THREE.BoxGeometry(w, 0.2, d);
+            const pad = new THREE.Mesh(padGeo, material);
+            pad.position.set(x, y, z);
+            pad.castShadow = true;
+            scene.add(pad);
+
+            // 黃色彈性箭頭花紋
+            const arrowGeo = new THREE.ConeGeometry(w/4, d/2, 4);
+            const arrowMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+            const arrow = new THREE.Mesh(arrowGeo, arrowMat);
+            arrow.rotation.x = -Math.PI / 2;
+            arrow.position.set(x, y + 0.11, z);
+            scene.add(arrow);
+
+            // 【關鍵修正】強制即時更新世界矩陣
+            pad.updateMatrixWorld(true);
+            boostPads.push({
+                box: new THREE.Box3().setFromObject(pad),
+                power: power
+            });
+        }
+
+        // 單擺流星錘
+        function createSwinger(x, y, z, length, radius, material, speed, offset) {
+            const pivot = new THREE.Group();
+            pivot.position.set(x, y, z);
+
+            // 擺線
+            const ropeGeo = new THREE.CylinderGeometry(0.08, 0.08, length, 8);
+            const ropeMat = new THREE.MeshStandardMaterial({ color: 0x34495e });
+            const rope = new THREE.Mesh(ropeGeo, ropeMat);
+            rope.position.y = -length / 2;
+            pivot.add(rope);
+
+            // 底部鐵球
+            const ballGeo = new THREE.SphereGeometry(radius, 16, 16);
+            const ball = new THREE.Mesh(ballGeo, material);
+            ball.position.y = -length;
+            ball.castShadow = true;
+            pivot.add(ball);
+
+            scene.add(pivot);
+            swingingObstacles.push({
+                pivot: pivot,
+                speed: speed,
+                length: length,
+                radius: radius,
+                offset: offset,
+                ballWorldPos: new THREE.Vector3()
+            });
+        }
+
+        // 滾動大球
+        function createRollingStone(x, y, z, material) {
+            const geo = new THREE.SphereGeometry(1.2, 24, 24);
+            const ball = new THREE.Mesh(geo, material);
+            ball.position.set(x, y, z);
+            ball.castShadow = true;
+            scene.add(ball);
+
+            swingingObstacles.push({
+                isRollingBall: true,
+                mesh: ball,
+                originX: x,
+                originY: y,
+                originZ: z,
+                radius: 1.2,
+                speedZ: -4.5, // 往 z 負方向滾
+                rollSpeed: 4.0
+            });
+        }
+
+        // 終點皇冠
+        function buildCrown(x, y, z) {
+            finishCrown = new THREE.Group();
+            finishCrown.position.set(x, y, z);
+
+            // 皇冠底圈
+            const baseGeo = new THREE.CylinderGeometry(1.0, 1.0, 0.4, 16, 1, true);
+            const crownMat = new THREE.MeshStandardMaterial({ color: 0xffd700, roughness: 0.1, metalness: 0.9, side: THREE.DoubleSide });
+            const base = new THREE.Mesh(baseGeo, crownMat);
+            finishCrown.add(base);
+
+            // 皇冠尖刺
+            const spikeCount = 6;
+            for(let i = 0; i < spikeCount; i++) {
+                const angle = (i / spikeCount) * Math.PI * 2;
+                const spikeGeo = new THREE.ConeGeometry(0.2, 0.8, 4);
+                const spike = new THREE.Mesh(spikeGeo, crownMat);
+                
+                spike.position.x = Math.cos(angle) * 0.95;
+                spike.position.z = Math.sin(angle) * 0.95;
+                spike.position.y = 0.3;
+                spike.rotation.y = -angle;
+                spike.rotation.z = -0.2; // 向外傾斜
+                
+                // 頂端寶石
+                const gemGeo = new THREE.SphereGeometry(0.08, 8, 8);
+                const gemMat = new THREE.MeshStandardMaterial({ color: i % 2 === 0 ? 0xff0000 : 0x0000ff });
+                const gem = new THREE.Mesh(gemGeo, gemMat);
+                gem.position.y = 0.45;
+                spike.add(gem);
+
+                finishCrown.add(spike);
+            }
+
+            scene.add(finishCrown);
+        }
+
+
+        // --- 4. 鍵盤與行動裝置控制註冊 ---
+        function setupControls() {
+            // 鍵盤按下
+            window.addEventListener('keydown', (e) => {
+                if (keys.hasOwnProperty(e.key)) {
+                    keys[e.key] = true;
+                }
+                // 空白鍵跳躍
+                if (e.key === ' ' || e.key === 'Spacebar') {
+                    triggerJump();
+                }
+                // 切換相機視角
+                if (e.key.toLowerCase() === 'f') {
+                    toggleCameraMode();
+                }
+            });
+
+            // 鍵盤放開
+            window.addEventListener('keyup', (e) => {
+                if (keys.hasOwnProperty(e.key)) {
+                    keys[e.key] = false;
+                }
+            });
+
+            // 滑鼠/觸控拖曳旋轉視角
+            const container = document.getElementById('canvas-container');
+            
+            container.addEventListener('mousedown', (e) => {
+                isMouseDown = true;
+                previousMousePosition = { x: e.clientX, y: e.clientY };
+            });
+
+            window.addEventListener('mousemove', (e) => {
+                if (!isMouseDown) return;
+                const deltaX = e.clientX - previousMousePosition.x;
+                const deltaY = e.clientY - previousMousePosition.y;
+                
+                // 調整相機水平與垂直環繞角度
+                cameraConfig.targetAngle -= deltaX * 0.007;
+                cameraConfig.pitch = Math.max(0.05, Math.min(Math.PI / 3, cameraConfig.pitch + deltaY * 0.005));
+
+                previousMousePosition = { x: e.clientX, y: e.clientY };
+            });
+
+            window.addEventListener('mouseup', () => {
+                isMouseDown = false;
+            });
+
+            // 手機虛擬搖桿邏輯
+            const joystick = document.getElementById('joystick');
+            const knob = document.getElementById('joystick-knob');
+            let joystickActive = false;
+            let joystickOrigin = { x: 0, y: 0 };
+
+            joystick.addEventListener('touchstart', (e) => {
+                joystickActive = true;
+                const rect = joystick.getBoundingClientRect();
+                joystickOrigin = {
+                    x: rect.left + rect.width / 2,
+                    y: rect.top + rect.height / 2
+                };
+                handleJoystickMove(e.targetTouches[0]);
+            });
+
+            window.addEventListener('touchmove', (e) => {
+                if (!joystickActive) return;
+                // 尋找對應的 Touch 物件
+                for (let i = 0; i < e.touches.length; i++) {
+                    const touch = e.touches[i];
+                    if (touch.target === joystick || joystick.contains(touch.target)) {
+                        handleJoystickMove(touch);
+                        break;
+                    }
+                }
+            }, { passive: false });
+
+            window.addEventListener('touchend', (e) => {
+                if (joystickActive) {
+                    joystickActive = false;
+                    knob.style.transform = `translate(0px, 0px)`;
+                    touchInput = { x: 0, y: 0 };
+                }
+            });
+
+            function handleJoystickMove(touch) {
+                const dx = touch.clientX - joystickOrigin.x;
+                const dy = touch.clientY - joystickOrigin.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                const maxDist = 50; // 搖桿最大半徑
+
+                let strength = Math.min(dist / maxDist, 1.0);
+                let angle = Math.atan2(dy, dx);
+
+                const moveX = Math.cos(angle) * strength * maxDist;
+                const moveY = Math.sin(angle) * strength * maxDist;
+
+                knob.style.transform = `translate(${moveX}px, ${moveY}px)`;
+
+                // 傳入正規化後的方向值 (水平 X, 垂直 Y)
+                touchInput.x = Math.cos(angle) * strength;
+                touchInput.y = -Math.sin(angle) * strength; // 螢幕 Y 是朝下的，而我們的 3D 世界 Z 軸朝前，故取反
+            }
+
+            // 手機跳躍按鈕
+            const jumpBtn = document.getElementById('jump-btn');
+            jumpBtn.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                triggerJump();
+            });
+        }
+
+        // 觸發跳躍邏輯
+        function triggerJump() {
+            if (!gameActive) return;
+
+            if (playerPhysics.onGround) {
+                playerPhysics.velocity.y = playerPhysics.jumpForce;
+                playerPhysics.onGround = false;
+                playerPhysics.doubleJumpAvailable = true;
+                // 跳躍動畫微動
+                player.scale.set(0.8, 1.2, 0.8);
+            } else if (playerPhysics.doubleJumpAvailable) {
+                // 空中二段跳/前撲衝刺
+                playerPhysics.velocity.y = playerPhysics.jumpForce * 0.85;
+                playerPhysics.doubleJumpAvailable = false;
+                
+                // 前撲力量 (給予前進的瞬間力)
+                const forward = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), cameraConfig.angle);
+                playerPhysics.velocity.addScaledVector(forward, 6.0);
+
+                // 前撲動畫翻轉效果
+                player.rotation.x = -0.5;
+                player.scale.set(1.2, 0.7, 1.0);
+            }
+        }
+
+        // 切換自由相機/跟隨相機模式
+        function toggleCameraMode() {
+            if (cameraConfig.mode === 'behind') {
+                cameraConfig.mode = 'free';
+                document.getElementById('camera-btn').innerHTML = `<i class="fa-solid fa-arrows-spin"></i> 視角: 自由`;
+            } else {
+                cameraConfig.mode = 'behind';
+                cameraConfig.targetAngle = player.rotation.y;
+                document.getElementById('camera-btn').innerHTML = `<i class="fa-solid fa-camera"></i> 視角: 鎖定`;
+            }
+        }
+
+
+        // --- 5. 核心物理引擎與碰撞檢測 ---
+        function updatePhysics(delta) {
+            if (!gameActive) return;
+
+            // --- A. 取得玩家移動輸入方向 ---
+            let moveX = 0;
+            let moveZ = 0;
+
+            // 鍵盤輸入
+            if (keys.w || keys.ArrowUp) moveZ += 1;
+            if (keys.s || keys.ArrowDown) moveZ -= 1;
+            if (keys.a || keys.ArrowLeft) moveX += 1;
+            if (keys.d || keys.ArrowRight) moveX -= 1;
+
+            // 合併鍵盤與手機搖桿輸入
+            let inputDir = new THREE.Vector3(moveX, 0, moveZ);
+            if (isMobile && (Math.abs(touchInput.x) > 0.1 || Math.abs(touchInput.y) > 0.1)) {
+                inputDir.set(-touchInput.x, 0, touchInput.y);
+            }
+
+            // 依據相機旋轉角修正移動方向，讓操作直覺
+            let moveVec = new THREE.Vector3();
+            if (inputDir.lengthSq() > 0.01) {
+                inputDir.normalize();
+                
+                // 水平旋轉基向量
+                const camAngle = cameraConfig.angle;
+                const forward = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), camAngle);
+                const right = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), camAngle);
+
+                moveVec.addScaledVector(right, inputDir.x);
+                moveVec.addScaledVector(forward, inputDir.z);
+                moveVec.normalize();
+
+                // 逐漸平滑旋轉糖豆人的朝向
+                const targetRotate = Math.atan2(moveVec.x, moveVec.z);
+                let diff = targetRotate - player.rotation.y;
+                // 確保旋轉最短弧度
+                diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+                player.rotation.y += diff * 0.15;
+
+                // 糖豆人走路動畫：雙腳擺動，Q彈縮放
+                const speedMult = 15;
+                const leftLeg = player.getObjectByName("leftLeg");
+                const rightLeg = player.getObjectByName("rightLeg");
+                if (leftLeg && rightLeg) {
+                    leftLeg.position.z = Math.sin(clock.getElapsedTime() * speedMult) * 0.25;
+                    rightLeg.position.z = -Math.sin(clock.getElapsedTime() * speedMult) * 0.25;
+                }
+                
+                // 全身彈性抖動效果
+                player.scale.y = 1 + Math.sin(clock.getElapsedTime() * speedMult * 2) * 0.05;
+                player.scale.x = player.scale.z = 1 - Math.sin(clock.getElapsedTime() * speedMult * 2) * 0.02;
+            } else {
+                // 靜止時回復原狀
+                player.scale.set(
+                    THREE.MathUtils.lerp(player.scale.x, 1.0, 0.2),
+                    THREE.MathUtils.lerp(player.scale.y, 1.0, 0.2),
+                    THREE.MathUtils.lerp(player.scale.z, 1.0, 0.2)
+                );
+                const leftLeg = player.getObjectByName("leftLeg");
+                const rightLeg = player.getObjectByName("rightLeg");
+                if (leftLeg && rightLeg) {
+                    leftLeg.position.z = THREE.MathUtils.lerp(leftLeg.position.z, 0, 0.2);
+                    rightLeg.position.z = THREE.MathUtils.lerp(rightLeg.position.z, 0, 0.2);
+                }
+            }
+
+            // --- B. 計算速度與重力 ---
+            // 基礎阻尼（摩擦力）
+            playerPhysics.velocity.x *= 0.82;
+            playerPhysics.velocity.z *= 0.82;
+
+            // 施加玩家操作的推動力
+            playerPhysics.velocity.x += moveVec.x * playerPhysics.speed * delta * 12;
+            playerPhysics.velocity.z += moveVec.z * playerPhysics.speed * delta * 12;
+
+            // 施加重力
+            playerPhysics.velocity.y += WORLD_GRAVITY * delta;
+
+            // 預期新位置
+            const nextPos = player.position.clone().addScaledVector(playerPhysics.velocity, delta);
+
+            // --- C. 平台與障礙碰撞檢測（AABB 碰撞） ---
+            let grounded = false;
+            
+            // 【關鍵修正】微調碰撞邊框：y軸底端減少 0.02 寬限值，x/z 軸內縮 0.05。
+            // 如此當角色站在平台上、或走過相鄰的平台接縫時，包圍盒不會錯誤卡進平台側面牆壁！
+            const playerBox = new THREE.Box3(
+                new THREE.Vector3(nextPos.x - playerPhysics.radius + 0.05, nextPos.y - 0.68, nextPos.z - playerPhysics.radius + 0.05),
+                new THREE.Vector3(nextPos.x + playerPhysics.radius - 0.05, nextPos.y + 0.8, nextPos.z + playerPhysics.radius - 0.05)
+            );
+
+            for (const platform of platforms) {
+                // 若為圓柱平台，用圓柱距離檢測
+                if (platform.isCylinder) {
+                    const distH = Math.sqrt(Math.pow(nextPos.x - platform.mesh.position.x, 2) + Math.pow(nextPos.z - platform.mesh.position.z, 2));
+                    const insideCylinder = distH < (platform.radius + playerPhysics.radius - 0.1);
+                    const insideHeight = nextPos.y - 0.7 < platform.mesh.position.y + platform.halfHeight && nextPos.y + 0.8 > platform.mesh.position.y - platform.halfHeight;
+                    
+                    if (insideCylinder && insideHeight) {
+                        // 落在圓柱頂部
+                        if (playerPhysics.velocity.y <= 0 && player.position.y - 0.65 >= platform.mesh.position.y + platform.halfHeight - 0.2) {
+                            nextPos.y = platform.mesh.position.y + platform.halfHeight + 0.7;
+                            playerPhysics.velocity.y = 0;
+                            grounded = true;
+                        }
+                    }
+                    continue;
+                }
+
+                // 斜坡特殊碰撞邏輯
+                if (platform.isSlope) {
+                    if (playerBox.intersectsBox(platform.box)) {
+                        // 計算斜坡上 Z 軸對應的高度
+                        const relativeZ = nextPos.z - platform.mesh.position.z; // -12 到 +12 之間
+                        // 斜面公式計算出該點的高 y 值
+                        const slopeY = platform.mesh.position.y + (relativeZ * Math.sin(platform.angleX)) + 0.95;
+                        
+                        if (nextPos.y - 0.7 <= slopeY && player.position.y - 0.7 >= slopeY - 1.0) {
+                            nextPos.y = slopeY + 0.7;
+                            playerPhysics.velocity.y = 0;
+                            grounded = true;
+                        }
+                    }
+                    continue;
+                }
+
+                // 正常 AABB 箱型平台碰撞
+                if (playerBox.intersectsBox(platform.box)) {
+                    // 1. 頂部著地碰撞 (從上方落下時)
+                    if (playerPhysics.velocity.y <= 0 && player.position.y - 0.65 >= platform.mesh.position.y + platform.halfHeight - 0.2) {
+                        nextPos.y = platform.mesh.position.y + platform.halfHeight + 0.7;
+                        playerPhysics.velocity.y = 0;
+                        grounded = true;
+
+                        // 傳送帶邏輯：給予外在傳送帶推力
+                        if (platform.conveyorSpeed) {
+                            playerPhysics.velocity.z += platform.conveyorSpeed;
+                        }
+                    }
+                    // 2. 底部天花板阻擋 (撞到平台下方時)
+                    else if (playerPhysics.velocity.y > 0 && player.position.y + 0.75 <= platform.mesh.position.y - platform.halfHeight + 0.2) {
+                        nextPos.y = platform.mesh.position.y - platform.halfHeight - 0.8;
+                        playerPhysics.velocity.y = -1;
+                    }
+                    // 3. 側面牆壁阻擋
+                    else {
+                        const overlapX = Math.min(
+                            (nextPos.x + playerPhysics.radius) - (platform.mesh.position.x - platform.halfWidth),
+                            (platform.mesh.position.x + platform.halfWidth) - (nextPos.x - playerPhysics.radius)
+                        );
+                        const overlapZ = Math.min(
+                            (nextPos.z + playerPhysics.radius) - (platform.mesh.position.z - platform.halfDepth),
+                            (platform.mesh.position.z + platform.halfDepth) - (nextPos.z - playerPhysics.radius)
+                        );
+
+                        if (overlapX < overlapZ) {
+                            // 修正 X 軸重疊
+                            if (nextPos.x > platform.mesh.position.x) {
+                                nextPos.x += overlapX + 0.02;
+                            } else {
+                                nextPos.x -= overlapX + 0.02;
+                            }
+                            playerPhysics.velocity.x = 0;
+                        } else {
+                            // 修正 Z 軸重疊
+                            if (nextPos.z > platform.mesh.position.z) {
+                                nextPos.z += overlapZ + 0.02;
+                            } else {
+                                nextPos.z -= overlapZ + 0.02;
+                            }
+                            playerPhysics.velocity.z = 0;
+                        }
+                    }
+                }
+            }
+
+            // 更新實際玩家坐標
+            player.position.copy(nextPos);
+            playerPhysics.onGround = grounded;
+
+            if (grounded) {
+                playerPhysics.doubleJumpAvailable = true;
+            }
+
+            // --- D. 彈簧跳墊碰撞 ---
+            for (const pad of boostPads) {
+                if (playerBox.intersectsBox(pad.box)) {
+                    // 給予超高向上的垂直力！
+                    playerPhysics.velocity.y = pad.power;
+                    playerPhysics.onGround = false;
+                    playerPhysics.doubleJumpAvailable = true;
+                    
+                    // 擠壓動畫
+                    player.scale.set(1.4, 0.5, 1.4);
+                }
+            }
+
+            // --- E. 掉落虛擬深淵檢測 ---
+            if (player.position.y < -12) {
+                failCount++;
+                document.getElementById('fail-count').textContent = failCount;
+                resetPlayer();
+            }
+
+            // --- F. 終點皇冠碰觸檢測（勝利條件） ---
+            const distToCrown = player.position.distanceTo(finishCrown.position);
+            if (distToCrown < 1.6) {
+                winGame();
+            }
+        }
+
+        // --- 6. 障礙物動態運動 (擺動、旋轉、滾大球) ---
+        function updateObstacles(delta) {
+            const time = clock.getElapsedTime();
+
+            // 1. 更新旋轉木槌
+            rotatingObstacles.forEach(rot => {
+                rot.group.rotation.y += rot.speed * delta;
+
+                // 精準旋轉棒碰撞：使用棒狀射線近似檢測
+                const diff = player.position.clone().sub(rot.group.position);
+                diff.y = 0; // 只看水平面距離
+                const dist = diff.length();
+
+                if (dist < rot.length / 2 + playerPhysics.radius && Math.abs(player.position.y - rot.group.position.y) < 1.0) {
+                    // 計算木槌當前與玩家夾角
+                    const angle = Math.atan2(diff.x, diff.z);
+                    const armAngle = -rot.group.rotation.y; // 旋轉方向
+                    
+                    let angleDiff = Math.abs(angle - armAngle) % (Math.PI * 2);
+                    if (angleDiff > Math.PI) angleDiff = Math.PI * 2 - angleDiff;
+
+                    // 若夾角極近（接觸長臂），將玩家狠狠朝外推飛！
+                    if (angleDiff < 0.25 || angleDiff > Math.PI - 0.25) {
+                        const pushForce = new THREE.Vector3(Math.sin(angle), 1.0, Math.cos(angle)).normalize();
+                        playerPhysics.velocity.copy(pushForce.multiplyScalar(15.0)); // 彈飛力道！
+                        playerPhysics.onGround = false;
+                        // 彈飛扭曲效果
+                        player.scale.set(0.6, 1.4, 0.6);
+                    }
+                }
+            });
+
+            // 2. 更新單擺流星錘與滾石
+            swingingObstacles.forEach(swing => {
+                if (swing.isRollingBall) {
+                    // 滾石球邏輯
+                    swing.mesh.position.z += swing.speedZ * delta;
+                    swing.mesh.rotation.x -= swing.rollSpeed * delta;
+
+                    // 超過斜坡下方，重置回起點無限滾動
+                    if (swing.mesh.position.z < 112) {
+                        swing.mesh.position.set(swing.originX, swing.originY, swing.originZ);
+                    }
+
+                    // 碰撞檢測 (球與糖豆人)
+                    const dist = player.position.distanceTo(swing.mesh.position);
+                    if (dist < (swing.radius + playerPhysics.radius - 0.1)) {
+                        // 擊退玩家
+                        const pushDir = player.position.clone().sub(swing.mesh.position).normalize();
+                        pushDir.y = 0.5; // 帶點向上的力量
+                        playerPhysics.velocity.copy(pushDir.multiplyScalar(13));
+                        playerPhysics.onGround = false;
+                    }
+                    return;
+                }
+
+                // 單擺物理公式
+                const angle = 0.9 * Math.cos(swing.speed * time + swing.offset);
+                swing.pivot.rotation.z = angle;
+
+                // 計算流星錘大鐵球在世界空間中的最新坐標
+                swing.ballWorldPos.set(0, -swing.length, 0);
+                swing.ballWorldPos.applyMatrix4(swing.pivot.matrixWorld);
+
+                // 與玩家碰撞檢測
+                const distToPlayer = player.position.clone().add(new THREE.Vector3(0, 0.2, 0)).distanceTo(swing.ballWorldPos);
+                if (distToPlayer < (swing.radius + playerPhysics.radius)) {
+                    // 計算撞擊方向向量
+                    const pushDir = player.position.clone().sub(swing.ballWorldPos).normalize();
+                    pushDir.y = 0.4; // 偏向上彈
+                    playerPhysics.velocity.copy(pushDir.multiplyScalar(18)); // 狂暴流星錘！彈力極大
+                    playerPhysics.onGround = false;
+                }
+            });
+
+            // 3. 皇冠慢慢自轉並發光
+            if (finishCrown) {
+                finishCrown.rotation.y += 1.5 * delta;
+                finishCrown.position.y = 10.6 + Math.sin(time * 3.5) * 0.25; // 飄浮律動
+            }
+        }
+
+        // --- 7. 相機追蹤與視野控制邏輯 ---
+        function updateCamera() {
+            // 平滑跟隨相機目標角度
+            cameraConfig.angle = THREE.MathUtils.lerp(cameraConfig.angle, cameraConfig.targetAngle, 0.15);
+
+            // 當模式為後面鎖定時，自動根據糖豆人前進朝向校正
+            if (cameraConfig.mode === 'behind') {
+                cameraConfig.targetAngle = player.rotation.y;
+            }
+
+            // 由球坐標計算相機位置
+            const targetX = player.position.x - Math.sin(cameraConfig.angle) * cameraConfig.distance * Math.cos(cameraConfig.pitch);
+            const targetZ = player.position.z - Math.cos(cameraConfig.angle) * cameraConfig.distance * Math.cos(cameraConfig.pitch);
+            const targetY = player.position.y + cameraConfig.height + Math.sin(cameraConfig.pitch) * cameraConfig.distance * 0.2;
+
+            // 平滑插值相機位置
+            camera.position.x = THREE.MathUtils.lerp(camera.position.x, targetX, 0.12);
+            camera.position.y = THREE.MathUtils.lerp(camera.position.y, targetY, 0.12);
+            camera.position.z = THREE.MathUtils.lerp(camera.position.z, targetZ, 0.12);
+
+            // 讓相機盯著糖豆人稍高的上半身位置
+            const lookTarget = player.position.clone().add(new THREE.Vector3(0, 0.5, 0));
+            camera.lookAt(lookTarget);
+        }
+
+        // --- 8. 遊戲控制、流程與 UI 管理 ---
+
+        // 開始計時器
+        function startTimer() {
+            if (gameTimerInterval) clearInterval(gameTimerInterval);
+            startTime = Date.now();
+            gameTimerInterval = setInterval(() => {
+                const totalMs = Date.now() - startTime;
+                const minutes = Math.floor(totalMs / 60000);
+                const seconds = Math.floor((totalMs % 60000) / 1000);
+                const ms = Math.floor((totalMs % 1000) / 10);
+                
+                document.getElementById('timer').textContent = 
+                    `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${ms.toString().padStart(2, '0')}`;
+            }, 50);
+        }
+
+        // 按下「進入派對！」
+        function startGame() {
+            document.getElementById('start-screen').classList.add('hidden');
+            gameActive = true;
+            resetPlayer();
+            startTimer();
+        }
+
+        // 重新開始 (過關後)
+        function restartGame() {
+            document.getElementById('game-over-screen').classList.add('hidden');
+            failCount = 0;
+            document.getElementById('fail-count').textContent = '0';
+            gameActive = true;
+            resetPlayer();
+            startTimer();
+        }
+
+        // 重置玩家回到起點（或檢查點）
+        function resetPlayer() {
+            playerPhysics.velocity.set(0, 0, 0);
+            
+            // 基礎檢查點邏輯：如果通過一半，就復活在中段
+            if (player.position.z > 85) {
+                player.position.set(0, 5, 88); // 齒輪關卡前
+            } else if (player.position.z > 38) {
+                player.position.set(0, 3, 41); // 傳送帶前
+            } else {
+                player.position.set(0, 4, 0);   // 起始大平台
+            }
+            
+            player.rotation.set(0, 0, 0);
+            playerPhysics.onGround = false;
+            
+            // 視角初始化
+            cameraConfig.angle = 0;
+            cameraConfig.targetAngle = 0;
+            cameraConfig.pitch = 0.25;
+            
+            // 瞬間重設相機位置避免閃爍
+            camera.position.set(0, 5, -7);
+        }
+
+        // 抵達終點！
+        function winGame() {
+            gameActive = false;
+            clearInterval(gameTimerInterval);
+            
+            // 停止玩家物理
+            playerPhysics.velocity.set(0, 0, 0);
+
+            // 更新 UI 結果
+            document.getElementById('end-time').textContent = document.getElementById('timer').textContent;
+            document.getElementById('end-fails').textContent = `${failCount} 次`;
+            
+            // 顯示過關介面
+            document.getElementById('game-over-screen').classList.remove('hidden');
+        }
+
+        // 視窗自適應縮放
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            checkMobile();
+        }
+
+        // --- 9. 主要渲染循環 (The Loop) ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const delta = Math.min(clock.getDelta(), 0.1); // 限制單幀最高時差，防止背景置放時穿模跳脫
+
+            // 更新物理
+            updatePhysics(delta);
+
+            // 更新動態障礙
+            updateObstacles(delta);
+
+            // 平滑追蹤相機
+            updateCamera();
+
+            // 渲染
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
